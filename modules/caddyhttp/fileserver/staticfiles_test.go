@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +31,7 @@ import (
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/internal/filesystems"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/encode"
 )
 
@@ -439,4 +442,25 @@ func (p testPrecompressed) AcceptEncoding() string {
 
 func (p testPrecompressed) Suffix() string {
 	return p.suffix
+}
+
+func TestMapDirOpenError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fsys := filesystems.OsFS{}
+
+	for i, tc := range []struct {
+		name string
+		want error
+	}{
+		{name: filepath.Join(root, "file.txt", "child"), want: fs.ErrNotExist},
+		{name: filepath.Join(root, "file.txt", "child\x00"), want: fs.ErrInvalid},
+	} {
+		_, err := fs.Stat(fsys, tc.name)
+		if got := new(FileServer).mapDirOpenError(fsys, err, tc.name); !errors.Is(got, tc.want) {
+			t.Errorf("Test %d: expected %v, got %v", i, tc.want, got)
+		}
+	}
 }
